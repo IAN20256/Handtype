@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#23272B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Hand Type — build a font from your handwriting</title>
+<link id="manifest-link" rel="manifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+<style>
+  :root{
+    --paper:#EDEAE0;
+    --paper-2:#E3DECB;
+    --ink:#23272B;
+    --ink-soft:#5A5F63;
+    --blue:#2F5D8A;
+    --brass:#9C6B30;
+    --teal:#3F6B5E;
+    --red:#A63D40;
+    --wood:#7C5A3A;
+    --wood-dark:#4E3721;
+    --wood-light:#96714A;
+    --radius:6px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--wood-dark);
+    font-family:'IBM Plex Sans', sans-serif; color:var(--ink);
+    overflow:hidden;
+  }
+  .display{font-family:'Fraunces', serif;}
+  .mono{font-family:'IBM Plex Mono', monospace; letter-spacing:.02em;}
+  #app{position:fixed; inset:0; display:flex; flex-direction:column;}
+
+  /* ---------- HEADER ---------- */
+  header{
+    flex:0 0 auto; background:linear-gradient(180deg,#2A211A,#1E1712);
+    color:var(--paper); padding:14px 16px 12px; display:flex; flex-direction:column; gap:10px;
+    border-bottom:3px solid var(--wood-dark);
+  }
+  .header-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  .title{display:flex; flex-direction:column; line-height:1.05;}
+  .title h1{margin:0; font-size:21px; font-weight:600; font-style:italic;}
+  .title span{font-size:10px; opacity:.6; text-transform:uppercase; letter-spacing:.12em; margin-top:2px;}
+  .name-input{
+    background:transparent; border:none; border-bottom:1px solid rgba(255,255,255,.25);
+    color:var(--paper); font-family:'IBM Plex Mono'; font-size:11px; padding:3px 2px; width:120px;
+  }
+  .name-input:focus{outline:none; border-bottom-color:var(--brass);}
+  .progress-wrap{display:flex; align-items:center; gap:8px;}
+  .progress-track{flex:1; height:4px; background:rgba(255,255,255,.15); border-radius:2px; overflow:hidden;}
+  .progress-fill{height:100%; background:var(--brass); width:0%; transition:width .3s;}
+  .progress-label{font-size:10px; opacity:.7; white-space:nowrap;}
+  .tabs{display:flex; gap:6px;}
+  .tab-btn{
+    flex:1; padding:9px 8px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.04);
+    color:var(--paper); border-radius:5px; font-size:12px; font-family:'IBM Plex Mono'; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--brass); border-color:var(--brass); color:#1E1712; font-weight:600;}
+
+  /* ---------- CASE (grid) VIEW ---------- */
+  #view-case{flex:1; overflow-y:auto; padding:14px 12px 90px;
+    background:
+      repeating-linear-gradient(90deg, var(--wood) 0 2px, var(--wood-light) 2px 46px),
+      var(--wood);
+  }
+  .section-title{
+    color:var(--paper); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    opacity:.75; margin:16px 2px 8px; display:flex; align-items:center; gap:8px;
+  }
+  .section-title::after{content:''; flex:1; height:1px; background:rgba(255,255,255,.2);}
+  .case-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(48px,1fr)); gap:5px;}
+  .cell{
+    aspect-ratio:1; border-radius:4px; position:relative; cursor:pointer;
+    background:linear-gradient(160deg,#1F1712,#150F0B);
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.5), inset 0 2px 3px rgba(0,0,0,.6);
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+  }
+  .cell.filled{background:var(--paper); box-shadow:inset 0 0 0 1px rgba(0,0,0,.35);}
+  .cell canvas{width:100%; height:100%;}
+  .cell .ghost-label{font-family:'Fraunces'; font-size:20px; color:rgba(255,255,255,.28);}
+  .cell .tag{
+    position:absolute; bottom:2px; right:3px; font-size:8px; color:var(--ink-soft);
+    background:rgba(237,234,224,.85); padding:0 2px; border-radius:2px;
+  }
+  .cell.filled .tag{opacity:.55;}
+
+  /* ---------- DRAW VIEW ---------- */
+  #view-draw{flex:1; display:none; flex-direction:column; background:var(--paper); overflow:hidden;}
+  .draw-topbar{
+    flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; background:var(--paper-2); border-bottom:1px solid rgba(0,0,0,.1);
+  }
+  .icon-btn{
+    border:none; background:transparent; font-family:'IBM Plex Mono'; font-size:13px;
+    color:var(--ink); padding:8px 10px; cursor:pointer; border-radius:5px;
+  }
+  .icon-btn:active{background:rgba(0,0,0,.08);}
+  .current-char{font-family:'Fraunces'; font-size:20px; font-style:italic;}
+  .canvas-wrap{flex:1; display:flex; align-items:center; justify-content:center; position:relative; padding:10px; min-height:0;}
+  #drawCanvas{background:#fff; border-radius:4px; box-shadow:0 2px 10px rgba(0,0,0,.18); touch-action:none; max-width:100%; max-height:100%;}
+  .rec-dot{
+    position:absolute; top:22px; left:50%; transform:translateX(-50%);
+    width:8px; height:8px; border-radius:50%; background:var(--red); opacity:0;
+  }
+  .rec-dot.on{opacity:1; animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{transform:translateX(-50%) scale(1);} 50%{transform:translateX(-50%) scale(1.5);}}
+  .draw-controls{
+    flex:0 0 auto; background:var(--paper-2); border-top:1px solid rgba(0,0,0,.1);
+    padding:10px 14px 16px; display:flex; flex-direction:column; gap:10px;
+  }
+  .slider-row{display:flex; align-items:center; gap:10px; font-size:11px;}
+  .slider-row input[type=range]{flex:1;}
+  .btn-row{display:flex; gap:8px;}
+  .btn{
+    flex:1; padding:11px 6px; border-radius:6px; border:1px solid rgba(0,0,0,.15);
+    background:#fff; font-family:'IBM Plex Mono'; font-size:12px; cursor:pointer; color:var(--ink);
+  }
+  .btn:active{background:rgba(0,0,0,.06);}
+  .btn.primary{background:var(--blue); color:#fff; border-color:var(--blue);}
+  .btn.warn{color:var(--red); border-color:rgba(166,61,64,.4);}
+  .nav-row{display:flex; justify-content:space-between; gap:8px;}
+
+  /* ---------- TYPE VIEW ---------- */
+  #view-type{flex:1; display:none; flex-direction:column; background:var(--paper); overflow:hidden;}
+  .type-topbar{
+    flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:10px 12px;
+    background:var(--paper-2); border-bottom:1px solid rgba(0,0,0,.1);
+  }
+  .type-topbar label{font-size:10px; color:var(--ink-soft); white-space:nowrap;}
+  #fontSize{flex:1;}
+  #typeArea{
+    flex:1; border:none; resize:none; padding:22px 20px; font-size:38px; line-height:1.5;
+    background:
+      linear-gradient(var(--paper) 0, var(--paper) calc(1.5em - 1px), rgba(47,93,138,.18) calc(1.5em - 1px), rgba(47,93,138,.18) 1.5em) 0 0.15em / 100% 1.5em;
+    color:var(--ink); outline:none;
+  }
+  .type-footer{
+    flex:0 0 auto; padding:10px 14px 16px; background:var(--paper-2); border-top:1px solid rgba(0,0,0,.1);
+    display:flex; gap:8px;
+  }
+  .empty-note{padding:14px; font-size:11px; color:var(--ink-soft); text-align:center;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="header-row">
+      <div class="title">
+        <h1>Hand Type</h1>
+        <span>a type case for your own handwriting</span>
+      </div>
+      <input id="fontNameInput" class="name-input mono" maxlength="24" placeholder="Font name" value="My Handwriting">
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-label mono" id="progressLabel">0/68 drawn</div>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="case">Case</button>
+      <button class="tab-btn" data-tab="type">Type &amp; Preview</button>
+      <button class="tab-btn" id="exportBtn">Export .ttf</button>
+    </div>
+  </header>
+
+  <!-- CASE VIEW -->
+  <div id="view-case"></div>
+
+  <!-- DRAW VIEW -->
+  <div id="view-draw">
+    <div class="draw-topbar">
+      <button class="icon-btn" id="backBtn">‹ Back</button>
+      <div class="current-char mono" id="currentCharLabel">a</div>
+      <button class="icon-btn" id="clearBtn">Clear</button>
+    </div>
+    <div class="canvas-wrap">
+      <div class="rec-dot" id="recDot"></div>
+      <canvas id="drawCanvas"></canvas>
+    </div>
+    <div class="draw-controls">
+      <div class="slider-row">
+        <span class="mono">Pen</span>
+        <input type="range" id="penWidth" min="4" max="34" value="16">
+        <span class="mono">Guide</span>
+        <input type="range" id="ghostOpacity" min="0" max="30" value="12" style="max-width:60px;">
+      </div>
+      <div class="btn-row">
+        <button class="btn warn" id="undoBtn">Undo</button>
+      </div>
+      <div class="nav-row">
+        <button class="btn" id="prevBtn">‹ Prev</button>
+        <button class="btn primary" id="doneBtn">Done</button>
+        <button class="btn" id="nextBtn">Next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TYPE VIEW -->
+  <div id="view-type">
+    <div class="type-topbar">
+      <label class="mono">Size</label>
+      <input type="range" id="fontSize" min="18" max="72" value="38">
+      <button class="icon-btn mono" id="refreshPreviewBtn">↻ Refresh</button>
+    </div>
+    <div id="typeEmptyNote" class="empty-note">Draw at least one letter in the Case view, then come back here to type with it.</div>
+    <textarea id="typeArea" placeholder="Type something to see it in your handwriting…" style="display:none;"></textarea>
+    <div class="type-footer">
+      <button class="btn primary" id="exportBtn2">Export .ttf</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- glyph set ----------
+  var LOWER = "abcdefghijklmnopqrstuvwxyz".split("");
+  var UPPER = LOWER.map(function(c){return c.toUpperCase();});
+  var DIGITS = "0123456789".split("");
+  var PUNCT = [".",",","!","?","'","-"];
+  var ALL = LOWER.concat(UPPER, DIGITS, PUNCT);
+
+  var SECTIONS = [
+    {title:"Lowercase", chars:LOWER},
+    {title:"Uppercase", chars:UPPER},
+    {title:"Numerals", chars:DIGITS},
+    {title:"Marks", chars:PUNCT}
+  ];
+
+  // ---------- canvas geometry (font design space, in px) ----------
+  var CANVAS_W = 380, CANVAS_H = 400;
+  var BASELINE = 320, CAP = 70, XHEIGHT = 195, DESC = 380;
+  var LEFT_PAD = 30;
+
+  // ---------- state ----------
+  var STORAGE_KEY = "handtype_project_v1";
+  var project = loadProject();
+  var currentChar = null;
+  var strokes = [];       // strokes for the glyph currently being edited
+  var activeStroke = null;
+
+  function loadProject(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(raw) return JSON.parse(raw);
+    }catch(e){}
+    return {fontName:"My Handwriting", strokeWidth:16, glyphs:{}};
+  }
+  function saveProject(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(project)); }catch(e){}
+  }
+
+  // ---------- manifest (best-effort "add to home screen") ----------
+  try{
+    var manifest = {name:"Hand Type", short_name:"HandType", start_url:".", display:"standalone",
+      background_color:"#EDEAE0", theme_color:"#23272B"};
+    var mBlob = new Blob([JSON.stringify(manifest)], {type:"application/json"});
+    document.getElementById("manifest-link").href = URL.createObjectURL(mBlob);
+  }catch(e){}
+
+  // ================= CASE VIEW =================
+  var caseView = document.getElementById("view-case");
+
+  function renderCase(){
+    caseView.innerHTML = "";
+    SECTIONS.forEach(function(section){
+      var h = document.createElement("div");
+      h.className = "section-title mono";
+      h.textContent = section.title;
+      caseView.appendChild(h);
+
+      var grid = document.createElement("div");
+      grid.className = "case-grid";
+      section.chars.forEach(function(ch){
+        grid.appendChild(makeCell(ch));
+      });
+      caseView.appendChild(grid);
+    });
+    updateProgress();
+  }
+
+  function makeCell(ch){
+    var cell = document.createElement("div");
+    var data = project.glyphs[ch];
+    var hasData = data && data.length > 0;
+    cell.className = "cell" + (hasData ? " filled" : "");
+    cell.addEventListener("click", function(){ openDraw(ch); });
+
+    if(hasData){
+      var c = document.createElement("canvas");
+      c.width = 90; c.height = 90;
+      paintThumbnail(c, data);
+      cell.appendChild(c);
+    } else {
+      var lab = document.createElement("div");
+      lab.className = "ghost-label";
+      lab.textContent = ch;
+      cell.appendChild(lab);
+    }
+    var tag = document.createElement("div");
+    tag.className = "tag mono";
+    tag.textContent = ch === " " ? "spc" : ch;
+    cell.appendChild(tag);
+    return cell;
+  }
+
+  function paintThumbnail(canvas, strokeList){
+    var ctx = canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    var sx = canvas.width / CANVAS_W, sy = canvas.height / CANVAS_H;
+    ctx.strokeStyle = "#23272B";
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(1.5, (project.strokeWidth||16) * ((sx+sy)/2) * 0.9);
+    strokeList.forEach(function(stroke){
+      if(stroke.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x*sx, stroke[0].y*sy);
+      for(var i=1;i<stroke.length;i++) ctx.lineTo(stroke[i].x*sx, stroke[i].y*sy);
+      ctx.stroke();
+    });
+  }
+
+  function updateProgress(){
+    var count = ALL.filter(function(c){ var d=project.glyphs[c]; return d && d.length>0; }).length;
+    document.getElementById("progressLabel").textContent = count + "/" + ALL.length + " drawn";
+    document.getElementById("progressFill").style.width = (count/ALL.length*100) + "%";
+  }
+
+  // ================= DRAW VIEW =================
+  var drawCanvas = document.getElementById("drawCanvas");
+  var ctx = drawCanvas.getContext("2d");
+  var recDot = document.getElementById("recDot");
+  var penWidthInput = document.getElementById("penWidth");
+  var ghostOpacityInput = document.getElementById("ghostOpacity");
+
+  function sizeCanvas(){
+    var ratio = window.devicePixelRatio || 1;
+    drawCanvas.width = CANVAS_W * ratio;
+    drawCanvas.height = CANVAS_H * ratio;
+    drawCanvas.style.width = CANVAS_W + "px";
+    drawCanvas.style.height = CANVAS_H + "px";
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+  }
+  sizeCanvas();
+
+  function openDraw(ch){
+    currentChar = ch;
+    strokes = (project.glyphs[ch] || []).map(function(s){ return s.slice(); });
+    activeStroke = null;
+    penWidthInput.value = project.strokeWidth || 16;
+    document.getElementById("currentCharLabel").textContent = ch === " " ? "(space)" : ch;
+    switchView("draw");
+    redrawCanvas();
+  }
+
+  function redrawCanvas(){
+    ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
+
+    // ghost tracing guide
+    var ghostA = (parseInt(ghostOpacityInput.value,10) || 0) / 100;
+    if(ghostA > 0 && currentChar && currentChar !== " "){
+      ctx.save();
+      ctx.globalAlpha = ghostA;
+      ctx.fillStyle = "#23272B";
+      ctx.font = "260px Georgia, serif";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(currentChar, LEFT_PAD, BASELINE);
+      ctx.restore();
+    }
+
+    // guide lines
+    ctx.save();
+    ctx.strokeStyle = "rgba(47,93,138,.35)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    [ [CAP,"cap"], [XHEIGHT,"x"], [BASELINE,"base"], [DESC,"desc"] ].forEach(function(g){
+      ctx.beginPath(); ctx.moveTo(0,g[0]); ctx.lineTo(CANVAS_W,g[0]); ctx.stroke();
+    });
+    ctx.restore();
+    ctx.fillStyle = "rgba(47,93,138,.6)";
+    ctx.font = "9px monospace";
+    ctx.fillText("baseline", 4, BASELINE-3);
+
+    // strokes
+    var w = parseInt(penWidthInput.value,10) || 16;
+    ctx.strokeStyle = "#23272B";
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = w;
+    var all = strokes.slice();
+    if(activeStroke) all.push(activeStroke);
+    all.forEach(function(stroke){
+      if(stroke.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x, stroke[0].y);
+      for(var i=1;i<stroke.length;i++) ctx.lineTo(stroke[i].x, stroke[i].y);
+      ctx.stroke();
+    });
+  }
+
+  function canvasPoint(e){
+    var rect = drawCanvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (CANVAS_W / rect.width),
+      y: (e.clientY - rect.top) * (CANVAS_H / rect.height)
+    };
+  }
+
+  drawCanvas.addEventListener("pointerdown", function(e){
+    e.preventDefault();
+    activeStroke = [canvasPoint(e)];
+    recDot.classList.add("on");
+    try{ drawCanvas.setPointerCapture(e.pointerId); }catch(err){}
+    redrawCanvas();
+  });
+  drawCanvas.addEventListener("pointermove", function(e){
+    if(!activeStroke) return;
+    e.preventDefault();
+    activeStroke.push(canvasPoint(e));
+    redrawCanvas();
+  });
+  function endStroke(){
+    if(activeStroke){
+      if(activeStroke.length > 1) strokes.push(activeStroke);
+      activeStroke = null;
+      recDot.classList.remove("on");
+      commitGlyph();
+      redrawCanvas();
+    }
+  }
+  drawCanvas.addEventListener("pointerup", endStroke);
+  drawCanvas.addEventListener("pointercancel", endStroke);
+  drawCanvas.addEventListener("pointerleave", function(){ if(activeStroke) endStroke(); });
+
+  penWidthInput.addEventListener("input", function(){ project.strokeWidth = parseInt(penWidthInput.value,10); redrawCanvas(); });
+  ghostOpacityInput.addEventListener("input", redrawCanvas);
+
+  function commitGlyph(){
+    project.glyphs[currentChar] = strokes.map(function(s){ return s.slice(); });
+    saveProject();
+  }
+
+  document.getElementById("undoBtn").addEventListener("click", function(){
+    strokes.pop(); commitGlyph(); redrawCanvas();
+  });
+  document.getElementById("clearBtn").addEventListener("click", function(){
+    if(strokes.length && !confirm("Clear this letter?")) return;
+    strokes = []; commitGlyph(); redrawCanvas();
+  });
+  document.getElementById("backBtn").addEventListener("click", function(){
+    commitGlyph(); renderCase(); switchView("case");
+  });
+  document.getElementById("doneBtn").addEventListener("click", function(){
+    commitGlyph(); renderCase(); switchView("case");
+  });
+  document.getElementById("prevBtn").addEventListener("click", function(){ stepGlyph(-1); });
+  document.getElementById("nextBtn").addEventListener("click", function(){ stepGlyph(1); });
+  function stepGlyph(dir){
+    commitGlyph();
+    var idx = ALL.indexOf(currentChar);
+    idx = (idx + dir + ALL.length) % ALL.length;
+    openDraw(ALL[idx]);
+  }
+
+  // ================= FONT BUILDING =================
+  function strokeToContour(points, widthPx){
+    if(points.length < 2) return null;
+    var left = [], right = [];
+    for(var i=0;i<points.length;i++){
+      var p = points[i], dx, dy;
+      if(i === 0){ dx = points[1].x-p.x; dy = points[1].y-p.y; }
+      else if(i === points.length-1){ dx = p.x-points[i-1].x; dy = p.y-points[i-1].y; }
+      else { dx = points[i+1].x-points[i-1].x; dy = points[i+1].y-points[i-1].y; }
+      var len = Math.hypot(dx,dy) || 1;
+      var nx = -dy/len, ny = dx/len;
+      left.push({x:p.x+nx*widthPx/2, y:p.y+ny*widthPx/2});
+      right.push({x:p.x-nx*widthPx/2, y:p.y-ny*widthPx/2});
+    }
+    return left.concat(right.reverse());
+  }
+
+  function buildFont(){
+    if(typeof opentype === "undefined") return null;
+    var unitsPerEm = 1000;
+    var scale = unitsPerEm / CANVAS_H;
+    var w = project.strokeWidth || 16;
+
+    var glyphs = [ new opentype.Glyph({name:".notdef", advanceWidth:300, path:new opentype.Path()}) ];
+    glyphs.push(new opentype.Glyph({name:"space", unicode:32, advanceWidth:260, path:new opentype.Path()}));
+
+    var any = false;
+    ALL.forEach(function(ch){
+      var strokeList = project.glyphs[ch];
+      if(!strokeList || strokeList.length === 0) return;
+      var minX = Infinity, maxX = -Infinity;
+      strokeList.forEach(function(s){ s.forEach(function(pt){ minX=Math.min(minX,pt.x); maxX=Math.max(maxX,pt.x); }); });
+      if(minX === Infinity) return;
+      any = true;
+      var sidebearing = 40;
+      var originX = minX - sidebearing;
+      var path = new opentype.Path();
+      strokeList.forEach(function(stroke){
+        if(stroke.length < 2) return;
+        var contour = strokeToContour(stroke, w);
+        if(!contour) return;
+        function fx(px){ return (px - originX) * scale; }
+        function fy(py){ return (BASELINE - py) * scale; }
+        path.moveTo(fx(contour[0].x), fy(contour[0].y));
+        for(var i=1;i<contour.length;i++) path.lineTo(fx(contour[i].x), fy(contour[i].y));
+        path.close();
+      });
+      var advanceWidth = Math.max((maxX-minX)*scale + sidebearing*2*scale, 200);
+      var codePoint = ch.codePointAt(0);
+      glyphs.push(new opentype.Glyph({name:"g"+codePoint, unicode:codePoint, advanceWidth:advanceWidth, path:path}));
+    });
+
+    if(!any) return null;
+
+    return new opentype.Font({
+      familyName: (project.fontName || "My Handwriting").trim() || "My Handwriting",
+      styleName: "Regular",
+      unitsPerEm: unitsPerEm,
+      ascender: 800,
+      descender: -200,
+      glyphs: glyphs
+    });
+  }
+
+  function exportFont(){
+    var font = buildFont();
+    if(!font){ alert("Draw at least one letter first."); return; }
+    var buf = font.toArrayBuffer();
+    var blob = new Blob([buf], {type:"font/ttf"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = ((project.fontName||"MyHandwriting").replace(/\s+/g,"") || "MyHandwriting") + ".ttf";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 3000);
+  }
+  document.getElementById("exportBtn").addEventListener("click", exportFont);
+  document.getElementById("exportBtn2").addEventListener("click", exportFont);
+
+  var currentFace = null;
+  function updatePreviewFont(){
+    var font = buildFont();
+    var typeArea = document.getElementById("typeArea");
+    var note = document.getElementById("typeEmptyNote");
+    if(!font){
+      note.style.display = "block";
+      typeArea.style.display = "none";
+      return;
+    }
+    note.style.display = "none";
+    typeArea.style.display = "block";
+    var buf = font.toArrayBuffer();
+    var face = new FontFace("HandTypeLive", buf);
+    face.load().then(function(loaded){
+      if(currentFace) document.fonts.delete(currentFace);
+      document.fonts.add(loaded);
+      currentFace = loaded;
+      typeArea.style.fontFamily = "'HandTypeLive', sans-serif";
+    }).catch(function(err){ console.error(err); });
+  }
+  document.getElementById("refreshPreviewBtn").addEventListener("click", updatePreviewFont);
+  document.getElementById("fontSize").addEventListener("input", function(){
+    document.getElementById("typeArea").style.fontSize = this.value + "px";
+  });
+
+  // ================= NAV =================
+  function switchView(name){
+    document.getElementById("view-case").style.display = name === "case" ? "block" : "none";
+    document.getElementById("view-draw").style.display = name === "draw" ? "flex" : "none";
+    document.getElementById("view-type").style.display = name === "type" ? "flex" : "none";
+    document.querySelectorAll(".tab-btn[data-tab]").forEach(function(btn){
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
+    });
+    if(name === "type") updatePreviewFont();
+  }
+  document.querySelectorAll(".tab-btn[data-tab]").forEach(function(btn){
+    btn.addEventListener("click", function(){ switchView(btn.getAttribute("data-tab")); });
+  });
+
+  document.getElementById("fontNameInput").value = project.fontName || "My Handwriting";
+  document.getElementById("fontNameInput").addEventListener("input", function(){
+    project.fontName = this.value; saveProject();
+  });
+
+  renderCase();
+  switchView("case");
+})();
+</script>
+</body>
+</html>
